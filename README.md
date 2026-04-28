@@ -60,8 +60,8 @@
 ## ⚡ Quick start
 
 ```bash
-git clone <repo>
-cd 110-claude-n8n
+git clone https://github.com/ravtechz/claude-n8n-demo.git
+cd claude-n8n-demo
 # 👉 urmeaza pasii din docs/ in ordine
 ```
 
