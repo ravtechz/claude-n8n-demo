@@ -1,0 +1,446 @@
+{
+  "name": "Telegram Shop DB Assistant (RO)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -64,
+        288
+      ],
+      "webhookId": "19282ba7-39fc-4232-baaf-d176819e4f3d",
+      "credentials": {
+        "telegramApi": {
+          "id": "dslHZdLMTItiaWKF",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-4-20250514"
+        },
+        "options": {
+          "maxTokensToSample": 1024,
+          "temperature": 0
+        }
+      },
+      "id": "anthropic-model-1",
+      "name": "Anthropic Chat Model (SQL)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        128,
+        512
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "Z0QBFoBID1g5RNze",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message.text }}",
+        "options": {
+          "systemMessage": "Ești un expert PostgreSQL pentru o bază de date de magazin online numită \"shop\". Analizezi întrebări în limba română și returnezi un JSON strict care direcționează workflow-ul.\n\n===== SCHEMA COMPLETĂ =====\n\nTABLE customers (clienți)\n  id INTEGER PK, first_name VARCHAR, last_name VARCHAR, email VARCHAR UNIQUE, country VARCHAR, city VARCHAR, created_at DATE\n\nTABLE products (produse)\n  id INTEGER PK, name VARCHAR, category VARCHAR, price NUMERIC, stock INTEGER, created_at DATE\n\nTABLE orders (comenzi)\n  id INTEGER PK, customer_id INTEGER -> customers.id, status VARCHAR ('pending','completed','cancelled','shipped'), total_amount NUMERIC, order_date DATE\n\nTABLE order_items (linii)\n  id INTEGER PK, order_id INTEGER -> orders.id, product_id INTEGER -> products.id, quantity INTEGER, unit_price NUMERIC\n\n===== RELAȚII =====\norders.customer_id -> customers.id\norder_items.order_id -> orders.id\norder_items.product_id -> products.id\n\n===== OUTPUT =====\nRăspunzi DOAR cu un JSON valid, fără markdown fences, fără ```json, fără text explicativ. Structura obligatorie:\n{\n  \"intent\": \"text\" | \"chart\",\n  \"chart_type\": \"line\" | \"bar\" | \"horizontalBar\" | \"pie\" | null,\n  \"sql\": \"SELECT ...\"\n}\n\n===== CLASIFICARE INTENT =====\nintent = \"chart\" dacă:\n- mesajul conține: \"grafic\", \"chart\", \"diagramă\", \"vizualizează\", \"plot\", \"arată evoluția\", \"evoluția\", \"tendința\", \"trend\"\n- SAU rezultatul natural e serie temporală / comparație între categorii / distribuție parts-of-whole\nintent = \"text\" pentru orice altceva (numere unice, întrebări factuale scurte).\n\n===== chart_type =====\n- \"line\"          : serii temporale (pe luni/zile/ani), evoluții\n- \"bar\"           : top N / comparații cu N <= 8 și etichete scurte\n- \"horizontalBar\" : comparații cu etichete lungi (nume produse) sau N > 8\n- \"pie\"           : distribuție parts-of-whole, max 8 felii\n- null            : doar când intent = \"text\"\n\n===== REGULI SQL =====\n1. Un singur SELECT, fără punct și virgulă final, fără markdown fences.\n2. Când intent=\"chart\", SQL TREBUIE să întoarcă EXACT 2 coloane: prima = etichetă (text / dată formatată), a doua = valoare numerică. Nume coloane descriptive în română.\n3. Serii temporale lunare: folosește to_char(date_trunc('month', data), 'YYYY-MM') ca etichetă.\n4. Sume monetare: ROUND(SUM(...)::numeric, 2).\n5. Perioade relative: CURRENT_DATE și INTERVAL.\n6. Top N: ORDER BY + LIMIT N.\n7. Căutări text: ILIKE '%...%'.\n8. Niciodată INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE.\n9. Nu inventa tabele sau coloane.\n\n===== EXEMPLE =====\n\nÎntrebare: \"Câți clienți am?\"\n{\"intent\":\"text\",\"chart_type\":null,\"sql\":\"SELECT COUNT(*) AS total_clienti FROM customers\"}\n\nÎntrebare: \"Arată-mi grafic vânzările pe ultimele 3 luni\"\n{\"intent\":\"chart\",\"chart_type\":\"line\",\"sql\":\"SELECT to_char(date_trunc('month', order_date), 'YYYY-MM') AS luna, ROUND(SUM(total_amount)::numeric, 2) AS vanzari FROM orders WHERE order_date >= date_trunc('month', CURRENT_DATE - INTERVAL '2 months') GROUP BY luna ORDER BY luna\"}\n\nÎntrebare: \"Top 5 produse după cantitate, ca grafic\"\n{\"intent\":\"chart\",\"chart_type\":\"bar\",\"sql\":\"SELECT p.name AS produs, SUM(oi.quantity) AS cantitate FROM order_items oi JOIN products p ON p.id = oi.product_id GROUP BY p.id, p.name ORDER BY cantitate DESC LIMIT 5\"}\n\nÎntrebare: \"Distribuția clienților pe țări\"\n{\"intent\":\"chart\",\"chart_type\":\"pie\",\"sql\":\"SELECT country AS tara, COUNT(*) AS numar_clienti FROM customers WHERE country IS NOT NULL GROUP BY country ORDER BY numar_clienti DESC LIMIT 8\"}\n\nÎntrebare: \"Câți clienți am din fiecare țară?\"\n{\"intent\":\"text\",\"chart_type\":null,\"sql\":\"SELECT country, COUNT(*) AS numar_clienti FROM customers WHERE country IS NOT NULL GROUP BY country ORDER BY numar_clienti DESC\"}\n\nÎntrebare: \"Care a fost cifra de afaceri luna trecută?\"\n{\"intent\":\"text\",\"chart_type\":null,\"sql\":\"SELECT ROUND(SUM(total_amount)::numeric, 2) AS cifra_afaceri FROM orders WHERE order_date >= date_trunc('month', CURRENT_DATE - INTERVAL '1 month') AND order_date < date_trunc('month', CURRENT_DATE)\"}"
+        }
+      },
+      "id": "ai-agent-sql",
+      "name": "AI Agent 1 - SQL Generator",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        224,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "postgres-exec",
+      "name": "Postgres - Execute Query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        864,
+        288
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "s17tv1N22CfWTZxG",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-4-20250514"
+        },
+        "options": {
+          "maxTokensToSample": 1024,
+          "temperature": 0.2
+        }
+      },
+      "id": "anthropic-model-2",
+      "name": "Anthropic Chat Model (Formatter)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        1376,
+        256
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "Z0QBFoBID1g5RNze",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Întrebarea utilizatorului:\n{{ $('Telegram Trigger').item.json.message.text }}\n\nRezultatul raw din baza de date (JSON):\n{{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "options": {
+          "systemMessage": "Ești un asistent care formatează rezultate de baze de date pentru Telegram. Primești întrebarea originală a utilizatorului (în română) și rezultatul raw JSON returnat de PostgreSQL. Compune un răspuns clar și concis în limba română.\n\nREGULI DE FORMATARE:\n1. Răspunde DOAR în limba română.\n2. Fii concis - răspunsul se citește pe ecran de telefon. Maxim 8-10 rânduri pentru liste, 1-3 rânduri pentru un singur număr/valoare.\n3. Formatează numerele întregi mari cu separator de mii (punct): 1.250, 12.480, 1.500.000.\n4. Formatează valutele cu 2 zecimale și separator de mii, urmate de \" RON\" (sau moneda din date dacă e specificată): 1.250,75 RON, 12.480,00 RON.\n5. Folosește virgulă ca separator zecimal, punct ca separator de mii (stil românesc).\n6. Pentru liste, folosește bullet-uri cu • sau numerotare 1. 2. 3.\n7. Nu include JSON, SQL sau detalii tehnice în răspuns.\n8. Dacă rezultatul este gol, spune scurt: \"Nu am găsit rezultate pentru întrebarea ta.\"\n9. Nu menționa numele coloanelor tehnice (ex: total_amount) - folosește traduceri naturale (ex: \"total\", \"valoare\").\n10. Poți folosi emoji sobru și relevant pentru context (📦 produse, 👥 clienți, 💰 sume, 📊 statistici), dar cu măsură - maxim 1-2 pe mesaj.\n11. Nu adăuga introduceri de genul \"Iată rezultatul:\" - intră direct în subiect.\n12. Formatează datele calendaristice în stil românesc: 17.04.2026 sau \"17 aprilie 2026\".\n\nExemple:\n\nÎntrebare: \"Câți clienți avem?\"\nJSON: [{\"total_clienti\": 500}]\nRăspuns: 👥 Avem 500 de clienți înregistrați.\n\nÎntrebare: \"Care a fost cifra de afaceri luna trecută?\"\nJSON: [{\"cifra_afaceri\": 42580.5}]\nRăspuns: 💰 Cifra de afaceri luna trecută: 42.580,50 RON.\n\nÎntrebare: \"Top 3 produse ca și cantitate?\"\nJSON: [{\"name\":\"Laptop Dell XPS\",\"cantitate_totala\":120},{\"name\":\"Mouse Logitech\",\"cantitate_totala\":95},{\"name\":\"Tastatură Mecanică\",\"cantitate_totala\":78}]\nRăspuns: 📦 Top 3 produse vândute:\n1. Laptop Dell XPS — 120 buc.\n2. Mouse Logitech — 95 buc.\n3. Tastatură Mecanică — 78 buc."
+        }
+      },
+      "id": "ai-agent-format",
+      "name": "AI Agent 2 - Formatter RO",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1376,
+        48
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').first().json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "telegram-send",
+      "name": "Telegram - Send Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1712,
+        48
+      ],
+      "webhookId": "c7f2a6b6-ea46-4ef0-869b-fd6cb33b39c1",
+      "executeOnce": true,
+      "credentials": {
+        "telegramApi": {
+          "id": "dslHZdLMTItiaWKF",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output;\nlet parsed;\nif (raw && typeof raw === 'object') {\n  parsed = raw;\n} else if (typeof raw === 'string') {\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  parsed = JSON.parse(match ? match[0] : raw);\n} else {\n  throw new Error('Unexpected agent output: ' + typeof raw);\n}\nreturn [{ json: { intent: parsed.intent, chart_type: parsed.chart_type ?? null, sql: parsed.sql } }];"
+      },
+      "id": "parse-output",
+      "name": "Parse Agent Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $('Parse Agent Output').first().json.intent }}",
+                    "rightValue": "text"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "version": 2,
+                  "leftValue": "",
+                  "caseSensitive": true,
+                  "typeValidation": "strict"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "leftValue": "={{ $('Parse Agent Output').first().json.intent }}",
+                    "rightValue": "chart"
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "chart"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-intent",
+      "name": "Switch - Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1088,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-4-20250514"
+        },
+        "options": {
+          "maxTokensToSample": 2048,
+          "temperature": 0
+        }
+      },
+      "id": "anthropic-model-3",
+      "name": "Anthropic Chat Model (Chart)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        1408,
+        704
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "Z0QBFoBID1g5RNze",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Întrebarea utilizatorului:\n{{ $('Telegram Trigger').first().json.message.text }}\n\nTipul graficului sugerat: {{ $('Parse Agent Output').first().json.chart_type }}\n\nDatele (JSON din PostgreSQL):\n{{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "options": {
+          "systemMessage": "Ești un constructor de configurații Chart.js. Primești întrebarea utilizatorului, un hint pentru tipul de grafic, și un array JSON din PostgreSQL (fiecare obiect are 2 câmpuri: prima cheie = label, a doua = valoare numerică).\n\nSARCINA:\n- Construiești un obiect JSON valid de config Chart.js.\n- Prima cheie din fiecare rând = label (string pe axa X / felie pie).\n- A doua cheie = valoare numerică (data).\n- Tipul graficului = hint-ul primit (line, bar, horizontalBar, pie).\n- Titlu în română, descriptiv, derivat din întrebare (max 60 caractere).\n- Culori sobre, profesionale.\n\nOUTPUT:\nRăspunzi DOAR cu obiectul JSON al config-ului Chart.js, fără markdown fences, fără ```json, fără text explicativ.\n\nSTRUCTURI VALIDE:\n\nPentru \"line\":\n{\n  \"type\": \"line\",\n  \"data\": {\n    \"labels\": [...],\n    \"datasets\": [{\"label\": \"<nume serie>\", \"data\": [...], \"borderColor\": \"#3b82f6\", \"backgroundColor\": \"rgba(59,130,246,0.25)\", \"borderWidth\": 2, \"tension\": 0.3, \"fill\": true}]\n  },\n  \"options\": {\n    \"plugins\": {\"title\": {\"display\": true, \"text\": \"<titlu>\"}, \"legend\": {\"display\": false}},\n    \"scales\": {\"y\": {\"beginAtZero\": true}}\n  }\n}\n\nPentru \"bar\":\n{\n  \"type\": \"bar\",\n  \"data\": {\n    \"labels\": [...],\n    \"datasets\": [{\"label\": \"<nume serie>\", \"data\": [...], \"backgroundColor\": \"#3b82f6\", \"borderRadius\": 4}]\n  },\n  \"options\": {\n    \"plugins\": {\"title\": {\"display\": true, \"text\": \"<titlu>\"}, \"legend\": {\"display\": false}},\n    \"scales\": {\"y\": {\"beginAtZero\": true}}\n  }\n}\n\nPentru \"horizontalBar\" folosește type=\"bar\" cu indexAxis=\"y\":\n{\n  \"type\": \"bar\",\n  \"data\": {\n    \"labels\": [...],\n    \"datasets\": [{\"label\": \"<nume serie>\", \"data\": [...], \"backgroundColor\": \"#3b82f6\", \"borderRadius\": 4}]\n  },\n  \"options\": {\n    \"indexAxis\": \"y\",\n    \"plugins\": {\"title\": {\"display\": true, \"text\": \"<titlu>\"}, \"legend\": {\"display\": false}}\n  }\n}\n\nPentru \"pie\":\n{\n  \"type\": \"pie\",\n  \"data\": {\n    \"labels\": [...],\n    \"datasets\": [{\"data\": [...], \"backgroundColor\": [\"#3b82f6\", \"#10b981\", \"#f59e0b\", \"#ef4444\", \"#8b5cf6\", \"#ec4899\", \"#14b8a6\", \"#f97316\"]}]\n  },\n  \"options\": {\n    \"plugins\": {\"title\": {\"display\": true, \"text\": \"<titlu>\"}, \"legend\": {\"position\": \"right\"}}\n  }\n}\n\nREGULI:\n- Păstrează ordinea datelor din array-ul primit.\n- Valorile din date sunt deja numere — pasează-le direct, fără reformatare.\n- Pentru labels: dacă valoarea e dată, convertește în format românesc scurt (ex: \"2026-04\" -> \"apr. 2026\").\n- Nu inventa date noi."
+        }
+      },
+      "id": "ai-agent-chart",
+      "name": "AI Agent 3 - Chart Config",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1408,
+        512
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "={{ $('Telegram Trigger').first().json.message.chat.id }}",
+        "file": "=https://quickchart.io/chart?w=700&h=450&bkg=white&c={{ encodeURIComponent($json.output) }}",
+        "additionalFields": {}
+      },
+      "id": "telegram-send-photo",
+      "name": "Telegram - Send Photo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1728,
+        512
+      ],
+      "webhookId": "5500ba2d-b1c8-4768-b0b4-f959191c56a3",
+      "executeOnce": true,
+      "credentials": {
+        "telegramApi": {
+          "id": "dslHZdLMTItiaWKF",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent 1 - SQL Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model (SQL)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent 1 - SQL Generator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model (Formatter)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent 2 - Formatter RO",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent 2 - Formatter RO": {
+      "main": [
+        [
+          {
+            "node": "Telegram - Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent 1 - SQL Generator": {
+      "main": [
+        [
+          {
+            "node": "Parse Agent Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Agent Output": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Execute Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Execute Query": {
+      "main": [
+        [
+          {
+            "node": "Switch - Route by Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch - Route by Intent": {
+      "main": [
+        [
+          {
+            "node": "AI Agent 2 - Formatter RO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent 3 - Chart Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model (Chart)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent 3 - Chart Config",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent 3 - Chart Config": {
+      "main": [
+        [
+          {
+            "node": "Telegram - Send Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "4ca8c34b-2d81-4ef8-8404-8f9559754707",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "835b838c15d5bb5f5537270c78986da66cd5de308408626edec736968f5deda7"
+  },
+  "id": "aEauLUYuPCneoBoH",
+  "tags": []
+}
